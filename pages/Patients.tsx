@@ -1,25 +1,13 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Search, 
-  Plus, 
-  Filter, 
-  MoreVertical, 
-  Edit, 
-  Trash2, 
-  CheckCircle2, 
-  Calendar,
-  X,
-  Stethoscope,
-  Bed,
-  Users,
-  Clock,
-  UserPlus,
-  LogOut
+  Search, Plus, Filter, Edit, Trash2, CheckCircle2, X,
+  Stethoscope, Users, Clock, UserPlus, Sparkles, Loader2
 } from 'lucide-react';
-import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from '../types';
-import { PatientController } from '../db';
+import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from '../types.js';
+import { PatientDAO } from '../db.js';
 import { format, differenceInYears, isBefore, startOfDay } from 'date-fns';
+import { GoogleGenAI, Type } from '@google/genai';
 
 interface PatientsPageProps {
   currentUser: Digitizer;
@@ -27,14 +15,23 @@ interface PatientsPageProps {
 
 const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDischargeModalOpen, setIsDischargeModalOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [selectedPatientForDischarge, setSelectedPatientForDischarge] = useState<Patient | null>(null);
 
-  const loadPatients = () => {
-    setPatients(PatientController.getAll());
+  const loadPatients = async () => {
+    setLoading(true);
+    try {
+      const data = await PatientDAO.find();
+      setPatients(data);
+    } catch (err) {
+      console.error("Erro ao carregar pacientes:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -48,9 +45,9 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
     );
   }, [patients, searchTerm]);
 
-  const handleDelete = (id: string) => {
-    if (confirm('Deseja realmente excluir este registro?')) {
-      PatientController.delete(id);
+  const handleDelete = async (id: string) => {
+    if (confirm('Deseja realmente excluir este registro no banco de dados?')) {
+      await PatientDAO.deleteOne(id);
       loadPatients();
     }
   };
@@ -74,7 +71,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Pacientes</h1>
-          <p className="text-slate-500">Gerencie o registro e acompanhamento clínico.</p>
+          <p className="text-slate-500">Gestão de prontuários persistidos no sistema.</p>
         </div>
         <button 
           onClick={() => handleOpenModal()}
@@ -97,108 +94,92 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
             className="w-full pl-12 pr-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
           />
         </div>
-        <button className="flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 text-slate-600 font-semibold rounded-xl hover:bg-slate-200 transition-colors">
-          <Filter size={20} />
-          Filtros
-        </button>
       </div>
 
       {/* Patients List */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Paciente</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Leito</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Status</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Entrada</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filteredPatients.length === 0 ? (
+        {loading ? (
+          <div className="p-20 flex flex-col items-center justify-center gap-4">
+            <Loader2 className="animate-spin text-blue-500" size={40} />
+            <p className="text-slate-400 font-medium">Sincronizando com o banco de dados...</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="p-4 bg-slate-50 rounded-full">
-                        <Users className="text-slate-300" size={40} />
-                      </div>
-                      <p className="text-slate-400 font-medium">Nenhum paciente encontrado.</p>
-                    </div>
-                  </td>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Paciente</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Leito</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Status</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Entrada</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Ações</th>
                 </tr>
-              ) : (
-                filteredPatients.map((patient) => (
-                  <tr key={patient.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-5">
-                      <div>
-                        <p className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{patient.name}</p>
-                        <p className="text-xs text-slate-500">{calculateAge(patient.birthDate)} anos • {patient.gender === 'M' ? 'Masculino' : 'Feminino'}</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold">
-                        Leito {patient.bed}
-                      </span>
-                    </td>
-                    <td className="px-6 py-5">
-                      {patient.dischargeDate ? (
-                        <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-xs bg-emerald-50 px-3 py-1 rounded-full w-fit">
-                          <CheckCircle2 size={14} />
-                          Alta em {format(new Date(patient.dischargeDate), 'dd/MM')}
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 text-amber-600 font-bold text-xs bg-amber-50 px-3 py-1 rounded-full w-fit">
-                          <Clock size={14} />
-                          Internado
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-5">
-                      <p className="text-sm font-medium text-slate-600">{format(new Date(patient.entryDate), 'dd/MM/yyyy')}</p>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center justify-end gap-2">
-                        {!patient.dischargeDate && (
-                          <button 
-                            title="Dar Alta"
-                            onClick={() => handleOpenDischargeModal(patient)}
-                            className="p-2 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                          >
-                            <CheckCircle2 size={18} />
-                          </button>
-                        )}
-                        <button 
-                          onClick={() => handleOpenModal(patient)}
-                          className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(patient.id)}
-                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredPatients.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-20 text-center text-slate-400">
+                      Nenhum paciente encontrado.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  filteredPatients.map((patient) => (
+                    <tr key={patient.id} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-5">
+                        <p className="font-bold text-slate-900">{patient.name}</p>
+                        <p className="text-xs text-slate-500">{calculateAge(patient.birthDate)} anos • {patient.gender}</p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold">
+                          Leito {patient.bed}
+                        </span>
+                      </td>
+                      <td className="px-6 py-5">
+                        {patient.dischargeDate ? (
+                          <div className="flex items-center gap-1.5 text-emerald-600 font-bold text-xs bg-emerald-50 px-3 py-1 rounded-full w-fit">
+                            <CheckCircle2 size={14} />
+                            Alta em {format(new Date(patient.dischargeDate), 'dd/MM')}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-amber-600 font-bold text-xs bg-amber-50 px-3 py-1 rounded-full w-fit">
+                            <Clock size={14} />
+                            Internado
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-5">
+                        <p className="text-sm font-medium text-slate-600">{format(new Date(patient.entryDate), 'dd/MM/yyyy')}</p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => handleOpenModal(patient)}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(patient.id)}
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {isModalOpen && (
         <PatientModal 
           patient={editingPatient} 
           onClose={() => setIsModalOpen(false)} 
-          onSave={() => {
-            loadPatients();
-            setIsModalOpen(false);
-          }}
+          onSave={loadPatients}
           currentUser={currentUser}
         />
       )}
@@ -207,92 +188,163 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
         <DischargeModal
           patient={selectedPatientForDischarge}
           onClose={() => setIsDischargeModalOpen(false)}
-          onSave={() => {
-            loadPatients();
-            setIsDischargeModalOpen(false);
-          }}
+          onSave={loadPatients}
         />
       )}
     </div>
   );
 };
 
-// Quick Discharge Modal
-interface DischargeModalProps {
-  patient: Patient;
-  onClose: () => void;
-  onSave: () => void;
-}
+// Modal with AI Integration
+const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onSave: () => void, currentUser: Digitizer }> = ({ patient, onClose, onSave, currentUser }) => {
+  const [formData, setFormData] = useState<Partial<Patient>>(
+    patient || {
+      name: '', birthDate: '', gender: 'M', motherName: '', 
+      bed: BED_OPTIONS[0], diagnosis: '', antibiotics: [], 
+      entryDate: format(new Date(), 'yyyy-MM-dd'), dischargeDate: null, 
+      digitizerId: currentUser.id
+    }
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
 
-const DischargeModal: React.FC<DischargeModalProps> = ({ patient, onClose, onSave }) => {
-  // Default to today
-  const [dischargeDate, setDischargeDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-
-  const handleConfirmDischarge = () => {
-    if (!dischargeDate) return;
-
-    // Validation: Discharge date cannot be before entry date
-    if (isBefore(new Date(dischargeDate), startOfDay(new Date(patient.entryDate)))) {
-      alert('A data de alta não pode ser anterior à data de entrada.');
+  const getAiHelp = async () => {
+    if (!formData.diagnosis || !formData.birthDate) {
+      alert("Preencha idade e diagnóstico para usar a IA.");
       return;
     }
 
-    const updatedPatient: Patient = {
-      ...patient,
-      dischargeDate: dischargeDate
-    };
+    setIsAiLoading(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const age = differenceInYears(new Date(), new Date(formData.birthDate!));
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Como assistente pediátrico, analise: Paciente de ${age} anos com diagnóstico "${formData.diagnosis}". Quais são os 3 pontos de atenção clínica cruciais e quais antibióticos da lista [${ANTIBIOTIC_OPTIONS.join(', ')}] costumam ser indicados? Responda de forma curta e técnica em JSON.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              pontos_atencao: { type: Type.ARRAY, items: { type: Type.STRING } },
+              antibioticos_sugeridos: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ["pontos_atencao", "antibioticos_sugeridos"]
+          }
+        }
+      });
 
-    PatientController.save(updatedPatient);
+      const result = JSON.parse(response.text);
+      setAiSuggestion(result.pontos_atencao.join(' | '));
+      // Pre-select suggested antibiotics if they exist in our list
+      const suggested = result.antibioticos_sugeridos.filter((a: string) => ANTIBIOTIC_OPTIONS.includes(a));
+      if (suggested.length > 0) {
+        setFormData(prev => ({ ...prev, antibiotics: Array.from(new Set([...(prev.antibiotics || []), ...suggested])) }));
+      }
+    } catch (err) {
+      console.error("Erro na IA:", err);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    const finalData: Patient = {
+      id: patient?.id || Math.random().toString(36).substr(2, 9),
+      ...formData as Patient
+    };
+    await PatientDAO.save(finalData);
     onSave();
+    onClose();
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        <header className="px-6 py-4 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-emerald-100 rounded-xl text-emerald-600">
-              <CheckCircle2 size={20} />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">Confirmar Alta</h2>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-900 transition-colors">
-            <X size={20} />
-          </button>
+      <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+        <header className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="text-xl font-bold text-slate-900">{patient ? 'Editar' : 'Novo'} Registro</h2>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-900"><X size={24} /></button>
         </header>
 
-        <div className="p-6 space-y-4">
-          <p className="text-slate-600">
-            Você está registrando a alta para o paciente <span className="font-bold text-slate-900">{patient.name}</span>.
-          </p>
-
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-            <label className="block text-sm font-semibold text-slate-700 mb-2">Data da Alta</label>
-            <input 
-              type="date" 
-              value={dischargeDate}
-              onChange={(e) => setDischargeDate(e.target.value)}
-              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-            />
-            <p className="mt-2 text-xs text-slate-500">
-              Data de entrada registrada: {format(new Date(patient.entryDate), 'dd/MM/yyyy')}
-            </p>
+        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-8 space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className="text-sm font-bold text-slate-700">Nome do Paciente</label>
+              <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
+            </div>
+            <div>
+              <label className="text-sm font-bold text-slate-700">Nascimento</label>
+              <input required type="date" value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
+            </div>
+            <div>
+              <label className="text-sm font-bold text-slate-700">Leito</label>
+              <select value={formData.bed} onChange={e => setFormData({...formData, bed: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                {BED_OPTIONS.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
           </div>
-        </div>
 
-        <footer className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-bold text-slate-700">Diagnóstico Suspeito</label>
+              <button 
+                type="button" 
+                onClick={getAiHelp} 
+                disabled={isAiLoading}
+                className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+              >
+                {isAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                Assistente IA
+              </button>
+            </div>
+            <textarea 
+              required
+              value={formData.diagnosis} 
+              onChange={e => setFormData({...formData, diagnosis: e.target.value})}
+              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl h-24 resize-none"
+              placeholder="Descreva a suspeita clínica..."
+            />
+            {aiSuggestion && (
+              <div className="mt-2 p-3 bg-amber-50 border border-amber-100 rounded-xl text-[10px] text-amber-800 font-medium animate-in fade-in slide-in-from-top-1">
+                <strong>Sugestão IA:</strong> {aiSuggestion}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm font-bold text-slate-700 mb-2 block">Antibióticos Prescritos</label>
+            <div className="flex flex-wrap gap-2">
+              {ANTIBIOTIC_OPTIONS.map(ant => (
+                <button
+                  key={ant}
+                  type="button"
+                  onClick={() => {
+                    const current = formData.antibiotics || [];
+                    setFormData({...formData, antibiotics: current.includes(ant) ? current.filter(a => a !== ant) : [...current, ant]});
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${formData.antibiotics?.includes(ant) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
+                >
+                  {ant}
+                </button>
+              ))}
+            </div>
+          </div>
+        </form>
+
+        <footer className="p-8 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl">Cancelar</button>
           <button 
-            onClick={onClose}
-            className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors"
+            type="button" 
+            onClick={handleSave} 
+            disabled={isSaving}
+            className="px-10 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg flex items-center gap-2"
           >
-            Cancelar
-          </button>
-          <button 
-            onClick={handleConfirmDischarge}
-            className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center gap-2"
-          >
-            <CheckCircle2 size={18} />
-            Confirmar Alta
+            {isSaving && <Loader2 size={18} className="animate-spin" />}
+            {patient ? 'Atualizar no Banco' : 'Salvar Registro'}
           </button>
         </footer>
       </div>
@@ -300,285 +352,30 @@ const DischargeModal: React.FC<DischargeModalProps> = ({ patient, onClose, onSav
   );
 };
 
-// Modal Component for Patient Form
-interface PatientModalProps {
-  patient: Patient | null;
-  onClose: () => void;
-  onSave: () => void;
-  currentUser: Digitizer;
-}
+const DischargeModal: React.FC<{ patient: Patient, onClose: () => void, onSave: () => void }> = ({ patient, onClose, onSave }) => {
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [loading, setLoading] = useState(false);
 
-const PatientModal: React.FC<PatientModalProps> = ({ patient, onClose, onSave, currentUser }) => {
-  const [formData, setFormData] = useState<Partial<Patient>>(
-    patient || {
-      name: '',
-      birthDate: '',
-      gender: 'M',
-      motherName: '',
-      bed: BED_OPTIONS[0],
-      diagnosis: '',
-      antibiotics: [],
-      entryDate: format(new Date(), 'yyyy-MM-dd'),
-      dischargeDate: null,
-      digitizerId: currentUser.id
-    }
-  );
-  const [customAntibiotic, setCustomAntibiotic] = useState('');
-
-  const validateAge = (date: string) => {
-    const years = differenceInYears(new Date(), new Date(date));
-    return years >= 0 && years <= 12;
-  };
-
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.name || !formData.birthDate || !formData.motherName || !formData.diagnosis) {
-      alert('Por favor, preencha todos os campos obrigatórios.');
-      return;
-    }
-
-    if (!validateAge(formData.birthDate!)) {
-      alert('Sistema restrito a pacientes de 0 a 12 anos.');
-      return;
-    }
-
-    // Date validation for manual entry
-    if (formData.dischargeDate && isBefore(new Date(formData.dischargeDate), startOfDay(new Date(formData.entryDate!)))) {
-      alert('A data de alta não pode ser anterior à data de entrada.');
-      return;
-    }
-
-    const patientData: Patient = {
-      id: patient?.id || Math.random().toString(36).substr(2, 9),
-      name: formData.name!,
-      birthDate: formData.birthDate!,
-      gender: formData.gender as 'M' | 'F',
-      motherName: formData.motherName!,
-      bed: formData.bed!,
-      diagnosis: formData.diagnosis!,
-      antibiotics: formData.antibiotics!,
-      entryDate: formData.entryDate!,
-      dischargeDate: formData.dischargeDate!,
-      digitizerId: formData.digitizerId!,
-      createdAt: patient?.createdAt || new Date().toISOString()
-    };
-
-    PatientController.save(patientData);
+  const handleDischarge = async () => {
+    setLoading(true);
+    await PatientDAO.save({ ...patient, dischargeDate: date });
     onSave();
-  };
-
-  const toggleAntibiotic = (ant: string) => {
-    const current = formData.antibiotics || [];
-    if (current.includes(ant)) {
-      setFormData({ ...formData, antibiotics: current.filter(a => a !== ant) });
-    } else {
-      setFormData({ ...formData, antibiotics: [...current, ant] });
-    }
-  };
-
-  const addCustomAntibiotic = () => {
-    if (customAntibiotic.trim()) {
-      const current = formData.antibiotics || [];
-      if (!current.includes(customAntibiotic)) {
-        setFormData({ ...formData, antibiotics: [...current, customAntibiotic] });
-      }
-      setCustomAntibiotic('');
-    }
+    onClose();
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-      <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col animate-in slide-in-from-bottom-4 duration-300">
-        <header className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
-              <UserPlus size={24} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">{patient ? 'Editar Registro' : 'Novo Registro Pediátrico'}</h2>
-              <p className="text-xs text-slate-500">Digitador: {currentUser.name}</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-900 transition-colors">
-            <X size={24} />
+      <div className="bg-white w-full max-w-md rounded-3xl p-8 space-y-6">
+        <h2 className="text-xl font-bold">Confirmar Alta</h2>
+        <p className="text-slate-500">Registrar saída para <strong>{patient.name}</strong>?</p>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 p-3 font-bold text-slate-500">Voltar</button>
+          <button onClick={handleDischarge} disabled={loading} className="flex-1 bg-emerald-600 text-white font-bold rounded-xl py-3 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            Confirmar Alta
           </button>
-        </header>
-
-        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-8 space-y-8">
-          {/* Dados Pessoais */}
-          <section>
-            <div className="flex items-center gap-2 mb-4 text-slate-400">
-              <Users size={18} />
-              <h3 className="text-sm font-bold uppercase tracking-wider">Dados Pessoais</h3>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Nome Completo *</label>
-                <input 
-                  required
-                  type="text" 
-                  value={formData.name} 
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Data de Nascimento *</label>
-                <input 
-                  required
-                  type="date" 
-                  value={formData.birthDate} 
-                  onChange={(e) => setFormData({...formData, birthDate: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Sexo *</label>
-                <select 
-                  value={formData.gender} 
-                  onChange={(e) => setFormData({...formData, gender: e.target.value as 'M' | 'F'})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                >
-                  <option value="M">Masculino</option>
-                  <option value="F">Feminino</option>
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Filiação (Mãe) *</label>
-                <input 
-                  required
-                  type="text" 
-                  value={formData.motherName} 
-                  onChange={(e) => setFormData({...formData, motherName: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* Registro Clínico */}
-          <section>
-            <div className="flex items-center gap-2 mb-4 text-slate-400">
-              <Stethoscope size={18} />
-              <h3 className="text-sm font-bold uppercase tracking-wider">Registro Clínico</h3>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Leito *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {BED_OPTIONS.map(bed => (
-                    <button
-                      key={bed}
-                      type="button"
-                      onClick={() => setFormData({...formData, bed})}
-                      className={`py-2 rounded-lg text-xs font-bold transition-all border ${
-                        formData.bed === bed 
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-blue-400'
-                      }`}
-                    >
-                      {bed}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Suspeita Diagnóstica *</label>
-                <textarea 
-                  required
-                  maxLength={250}
-                  value={formData.diagnosis}
-                  onChange={(e) => setFormData({...formData, diagnosis: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all h-[100px] resize-none"
-                  placeholder="Máximo 250 caracteres..."
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Antibióticos</label>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {ANTIBIOTIC_OPTIONS.map(ant => (
-                    <button
-                      key={ant}
-                      type="button"
-                      onClick={() => toggleAntibiotic(ant)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                        formData.antibiotics?.includes(ant)
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                          : 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {ant}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="Outro antibiótico..."
-                    value={customAntibiotic}
-                    onChange={(e) => setCustomAntibiotic(e.target.value)}
-                    className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <button 
-                    type="button"
-                    onClick={addCustomAntibiotic}
-                    className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors"
-                  >
-                    Adicionar
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Data de Entrada *</label>
-                <input 
-                  required
-                  type="date" 
-                  value={formData.entryDate} 
-                  onChange={(e) => setFormData({...formData, entryDate: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">Data de Alta (Opcional)</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="date" 
-                    value={formData.dischargeDate || ''} 
-                    onChange={(e) => setFormData({...formData, dischargeDate: e.target.value || null})}
-                    className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  />
-                  {formData.dischargeDate && (
-                    <button 
-                      type="button" 
-                      onClick={() => setFormData({...formData, dischargeDate: null})}
-                      className="p-3 text-red-500 bg-red-50 rounded-xl hover:bg-red-100 transition-colors"
-                    >
-                      <X size={20} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-        </form>
-
-        <footer className="px-8 py-6 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-4">
-          <button 
-            type="button" 
-            onClick={onClose}
-            className="px-6 py-3 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors"
-          >
-            Cancelar
-          </button>
-          <button 
-            type="button" 
-            onClick={handleSave}
-            className="px-10 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all"
-          >
-            {patient ? 'Salvar Alterações' : 'Finalizar Registro'}
-          </button>
-        </footer>
+        </div>
       </div>
     </div>
   );

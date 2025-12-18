@@ -1,18 +1,24 @@
 
-import React, { useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Users, 
-  Bed, 
-  Clock, 
-  ArrowUpRight,
-  TrendingUp,
-  AlertCircle
+  Users, Bed, Clock, ArrowUpRight, TrendingUp, AlertCircle, Loader2
 } from 'lucide-react';
-import { PatientController } from '../db';
+import { PatientDAO } from '../db.js';
+import { Patient } from '../types.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
 const Dashboard: React.FC = () => {
-  const patients = useMemo(() => PatientController.getAll(), []);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      const data = await PatientDAO.find();
+      setPatients(data);
+      setLoading(false);
+    };
+    fetch();
+  }, []);
   
   const stats = useMemo(() => {
     const admitted = patients.filter(p => !p.dischargeDate).length;
@@ -31,16 +37,20 @@ const Dashboard: React.FC = () => {
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [patients]);
 
-  const genderData = [
-    { name: 'Feminino', value: stats.female, color: '#ec4899' },
-    { name: 'Masculino', value: stats.male, color: '#3b82f6' }
-  ];
+  if (loading) {
+    return (
+      <div className="h-[60vh] flex flex-col items-center justify-center gap-4">
+        <Loader2 className="animate-spin text-blue-500" size={48} />
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">Carregando métricas do banco...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header>
         <h1 className="text-3xl font-bold text-slate-900">Dashboard de Controle</h1>
-        <p className="text-slate-500 mt-1">Visão geral dos atendimentos e ocupação.</p>
+        <p className="text-slate-500 mt-1">Status em tempo real sincronizado com a base de dados.</p>
       </header>
 
       {/* Stats Grid */}
@@ -64,46 +74,41 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Occupancy Chart */}
         <div className="lg:col-span-2 bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <AlertCircle className="text-blue-500" size={20} />
-              Ocupação por Leito
-            </h2>
-          </div>
+          <h2 className="text-lg font-bold flex items-center gap-2 mb-8">
+            <AlertCircle className="text-blue-500" size={20} />
+            Ocupação por Leito
+          </h2>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={bedOccupancyData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
-                <Tooltip 
-                  cursor={{fill: '#f8fafc'}}
-                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                />
+                <Tooltip cursor={{fill: '#f8fafc'}} />
                 <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={40} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Gender Distribution */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
           <h2 className="text-lg font-bold mb-8">Perfil Demográfico</h2>
           <div className="h-[250px] relative">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={genderData}
+                  data={[
+                    { name: 'Feminino', value: stats.female, color: '#ec4899' },
+                    { name: 'Masculino', value: stats.male, color: '#3b82f6' }
+                  ]}
                   innerRadius={60}
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {genderData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
+                  <Cell fill="#ec4899" />
+                  <Cell fill="#3b82f6" />
                 </Pie>
                 <Tooltip />
               </PieChart>
@@ -112,17 +117,6 @@ const Dashboard: React.FC = () => {
               <span className="text-2xl font-bold text-slate-900">{stats.total}</span>
               <span className="text-xs text-slate-500">Pacientes</span>
             </div>
-          </div>
-          <div className="mt-4 space-y-3">
-            {genderData.map((entry, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{backgroundColor: entry.color}} />
-                  <span className="text-slate-600 font-medium">{entry.name}</span>
-                </div>
-                <span className="font-bold text-slate-900">{entry.value}</span>
-              </div>
-            ))}
           </div>
         </div>
       </div>

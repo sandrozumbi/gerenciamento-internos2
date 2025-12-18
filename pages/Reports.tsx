@@ -1,34 +1,29 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  FileText, 
-  Download, 
-  Calendar, 
-  Filter, 
-  Search,
-  CheckCircle2,
-  XCircle,
-  Stethoscope,
-  // Fix: Adding missing Clock icon import
-  Clock
+  FileText, Download, Filter, Search, CheckCircle2, Loader2, Clock
 } from 'lucide-react';
-import { PatientController } from '../db';
-import { Patient, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from '../types';
+import { PatientDAO } from '../db.js';
+import { Patient, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from '../types.js';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const ReportsPage: React.FC = () => {
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
-    startDate: '',
-    endDate: '',
-    name: '',
-    bed: '',
-    antibiotic: '',
-    status: 'all' // all, admitted, discharged
+    startDate: '', endDate: '', name: '', bed: '', antibiotic: '', status: 'all'
   });
 
-  const patients = useMemo(() => PatientController.getAll(), []);
+  useEffect(() => {
+    const fetch = async () => {
+      const data = await PatientDAO.find();
+      setPatients(data);
+      setLoading(false);
+    };
+    fetch();
+  }, []);
 
   const filteredData = useMemo(() => {
     return patients.filter(p => {
@@ -36,11 +31,7 @@ const ReportsPage: React.FC = () => {
                           p.motherName.toLowerCase().includes(filters.name.toLowerCase());
       const matchesBed = filters.bed ? p.bed === filters.bed : true;
       const matchesAntibiotic = filters.antibiotic ? p.antibiotics.includes(filters.antibiotic) : true;
-      const matchesStatus = filters.status === 'all' 
-                            ? true 
-                            : filters.status === 'admitted' 
-                              ? !p.dischargeDate 
-                              : !!p.dischargeDate;
+      const matchesStatus = filters.status === 'all' ? true : filters.status === 'admitted' ? !p.dischargeDate : !!p.dischargeDate;
       
       let matchesDate = true;
       if (filters.startDate && filters.endDate) {
@@ -50,236 +41,77 @@ const ReportsPage: React.FC = () => {
           end: endOfDay(new Date(filters.endDate))
         });
       }
-
       return matchesName && matchesBed && matchesAntibiotic && matchesStatus && matchesDate;
     });
   }, [patients, filters]);
 
   const exportPDF = () => {
     const doc = new jsPDF();
-    
-    // Header
-    doc.setFontSize(22);
-    doc.setTextColor(15, 23, 42); // slate-900
-    doc.text('UPA Pediátrica - Relatório de Atendimentos', 14, 20);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 27);
-    doc.text(`Período: ${filters.startDate || 'Todo período'} até ${filters.endDate || 'Presente'}`, 14, 32);
-
-    // Table
+    doc.setFontSize(20);
+    doc.text('Relatório UPA Pediátrica', 14, 20);
     autoTable(doc, {
-      startY: 40,
-      head: [['Paciente', 'Entrada', 'Status', 'Leito', 'Antibióticos', 'Diagnóstico']],
+      startY: 30,
+      head: [['Paciente', 'Entrada', 'Status', 'Leito', 'Diagnóstico']],
       body: filteredData.map(p => [
         p.name,
         format(new Date(p.entryDate), 'dd/MM/yyyy'),
         p.dischargeDate ? 'Alta' : 'Internado',
         p.bed,
-        p.antibiotics.length > 0 ? p.antibiotics.join(', ') : 'Nenhum',
-        p.diagnosis.length > 30 ? p.diagnosis.substring(0, 30) + '...' : p.diagnosis
+        p.diagnosis
       ]),
-      headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { top: 40 },
     });
-
-    doc.save(`relatorio_upa_${format(new Date(), 'yyyyMMdd')}.pdf`);
+    doc.save(`relatorio_${Date.now()}.pdf`);
   };
+
+  if (loading) return <div className="p-20 text-center"><Loader2 className="animate-spin inline mr-2" /> Carregando base de dados...</div>;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Relatórios Estratégicos</h1>
-          <p className="text-slate-500 mt-1">Gere análises detalhadas e exporte em PDF.</p>
-        </div>
-        <button 
-          onClick={exportPDF}
-          disabled={filteredData.length === 0}
-          className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-600/20"
-        >
-          <Download size={20} />
-          Exportar PDF
+      <header className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Relatórios</h1>
+        <button onClick={exportPDF} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold flex items-center gap-2">
+          <Download size={20} /> Exportar
         </button>
       </header>
 
-      {/* Advanced Filters */}
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
-        <div className="flex items-center gap-2 text-slate-400 mb-2">
-          <Filter size={20} />
-          <h2 className="text-sm font-bold uppercase tracking-widest">Parâmetros de Filtragem</h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1">
-            <label className="block text-sm font-semibold text-slate-700 mb-1">Paciente ou Filiação</label>
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                value={filters.name}
-                onChange={(e) => setFilters({...filters, name: e.target.value})}
-                placeholder="Nome da criança ou mãe..."
-                className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-              />
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Início</label>
-              <input 
-                type="date" 
-                value={filters.startDate}
-                onChange={(e) => setFilters({...filters, startDate: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Fim</label>
-              <input 
-                type="date" 
-                value={filters.endDate}
-                onChange={(e) => setFilters({...filters, endDate: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Leito</label>
-              <select 
-                value={filters.bed}
-                onChange={(e) => setFilters({...filters, bed: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
-              >
-                <option value="">Todos</option>
-                {BED_OPTIONS.map(b => <option key={b} value={b}>Leito {b}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">Status</label>
-              <select 
-                value={filters.status}
-                onChange={(e) => setFilters({...filters, status: e.target.value})}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
-              >
-                <option value="all">Todos</option>
-                <option value="admitted">Internados</option>
-                <option value="discharged">Altas</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="lg:col-span-3">
-             <label className="block text-sm font-semibold text-slate-700 mb-1">Uso de Antibiótico</label>
-             <div className="flex flex-wrap gap-2">
-                <button 
-                  onClick={() => setFilters({...filters, antibiotic: ''})}
-                  className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${filters.antibiotic === '' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                >
-                  Todos
-                </button>
-                {ANTIBIOTIC_OPTIONS.map(ant => (
-                  <button 
-                    key={ant}
-                    onClick={() => setFilters({...filters, antibiotic: ant})}
-                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${filters.antibiotic === ant ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                  >
-                    {ant}
-                  </button>
-                ))}
-             </div>
-          </div>
-        </div>
+      <div className="bg-white p-6 rounded-3xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <input type="text" placeholder="Buscar nome..." value={filters.name} onChange={e => setFilters({...filters, name: e.target.value})} className="p-3 bg-slate-50 rounded-xl" />
+        <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="p-3 bg-slate-50 rounded-xl">
+          <option value="all">Todos os Status</option>
+          <option value="admitted">Internados</option>
+          <option value="discharged">Altas</option>
+        </select>
+        <select value={filters.bed} onChange={e => setFilters({...filters, bed: e.target.value})} className="p-3 bg-slate-50 rounded-xl">
+          <option value="">Todos os Leitos</option>
+          {BED_OPTIONS.map(b => <option key={b} value={b}>Leito {b}</option>)}
+        </select>
       </div>
 
-      {/* Results Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Resultados</p>
-            <p className="text-2xl font-black text-slate-900 mt-1">{filteredData.length}</p>
-          </div>
-          <FileText className="text-blue-500" size={32} />
-        </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Internados</p>
-            <p className="text-2xl font-black text-amber-600 mt-1">{filteredData.filter(p => !p.dischargeDate).length}</p>
-          </div>
-          <Clock className="text-amber-500" size={32} />
-        </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Altas</p>
-            <p className="text-2xl font-black text-emerald-600 mt-1">{filteredData.filter(p => p.dischargeDate).length}</p>
-          </div>
-          <CheckCircle2 className="text-emerald-500" size={32} />
-        </div>
-      </div>
-
-      {/* Table Preview */}
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Paciente</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Período</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Leito</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Antibióticos</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Diagnóstico</th>
+      <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="p-4 text-xs font-bold text-slate-500">PACIENTE</th>
+              <th className="p-4 text-xs font-bold text-slate-500">LEITO</th>
+              <th className="p-4 text-xs font-bold text-slate-500">STATUS</th>
+              <th className="p-4 text-xs font-bold text-slate-500 text-right">ENTRADA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredData.map(p => (
+              <tr key={p.id} className="border-t border-slate-50">
+                <td className="p-4 font-bold">{p.name}</td>
+                <td className="p-4">{p.bed}</td>
+                <td className="p-4">
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${p.dischargeDate ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                    {p.dischargeDate ? 'ALTA' : 'INTERNADO'}
+                  </span>
+                </td>
+                <td className="p-4 text-right text-slate-500">{format(new Date(p.entryDate), 'dd/MM/yyyy')}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredData.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
-                    Nenhum registro corresponde aos filtros selecionados.
-                  </td>
-                </tr>
-              ) : (
-                filteredData.map(patient => (
-                  <tr key={patient.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-bold text-slate-900">{patient.name}</p>
-                      <p className="text-xs text-slate-500">Mãe: {patient.motherName}</p>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {format(new Date(patient.entryDate), 'dd/MM/yyyy')}
-                      {patient.dischargeDate && ` - ${format(new Date(patient.dischargeDate), 'dd/MM/yyyy')}`}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold text-xs">
-                        {patient.bed}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {patient.antibiotics.length > 0 ? (
-                          patient.antibiotics.map((ant, idx) => (
-                            <span key={idx} className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-100">
-                              {ant}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-slate-400 text-xs italic">Nenhum</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm text-slate-600 truncate max-w-xs">{patient.diagnosis}</p>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
