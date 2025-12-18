@@ -1,9 +1,7 @@
 
-import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from './types';
+import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from './types.js';
 
-// In a real Vercel/Next.js environment, these would be API routes calling MongoDB.
-// Here we simulate the controller logic using LocalStorage for persistence in this demo.
-
+// Persistence simulation using LocalStorage
 const STORAGE_KEYS = {
   PATIENTS: 'upa_patients',
   DIGITIZERS: 'upa_digitizers',
@@ -46,7 +44,6 @@ const generateSeedPatients = (): Patient[] => {
     birthDate.setMonth(Math.floor(Math.random() * 12));
     birthDate.setDate(Math.floor(Math.random() * 28) + 1);
 
-    // Ensure they are taking antibiotics as requested
     const randomAntibiotics = [ANTIBIOTIC_OPTIONS[Math.floor(Math.random() * ANTIBIOTIC_OPTIONS.length)]];
     if (Math.random() > 0.7) {
       randomAntibiotics.push(ANTIBIOTIC_OPTIONS[Math.floor(Math.random() * ANTIBIOTIC_OPTIONS.length)]);
@@ -62,8 +59,8 @@ const generateSeedPatients = (): Patient[] => {
       diagnosis: diagnoses[i],
       antibiotics: Array.from(new Set(randomAntibiotics)),
       entryDate: entryDate.toISOString().split('T')[0],
-      dischargeDate: null, // Keep them admitted for visualization
-      digitizerId: '1', // Admin
+      dischargeDate: null,
+      digitizerId: '1',
       createdAt: new Date().toISOString()
     };
   });
