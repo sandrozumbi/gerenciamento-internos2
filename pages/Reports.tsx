@@ -71,12 +71,13 @@ const ReportsPage: React.FC = () => {
     // Table
     autoTable(doc, {
       startY: 40,
-      head: [['Paciente', 'Entrada', 'Status', 'Leito', 'Diagnóstico']],
+      head: [['Paciente', 'Entrada', 'Status', 'Leito', 'Antibióticos', 'Diagnóstico']],
       body: filteredData.map(p => [
         p.name,
         format(new Date(p.entryDate), 'dd/MM/yyyy'),
         p.dischargeDate ? 'Alta' : 'Internado',
         p.bed,
+        p.antibiotics.length > 0 ? p.antibiotics.join(', ') : 'Nenhum',
         p.diagnosis.length > 30 ? p.diagnosis.substring(0, 30) + '...' : p.diagnosis
       ]),
       headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' },
@@ -230,13 +231,14 @@ const ReportsPage: React.FC = () => {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Paciente</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Período</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Leito</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Antibióticos</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Diagnóstico</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-slate-400 font-medium">
+                  <td colSpan={5} className="px-6 py-12 text-center text-slate-400 font-medium">
                     Nenhum registro corresponde aos filtros selecionados.
                   </td>
                 </tr>
@@ -255,6 +257,19 @@ const ReportsPage: React.FC = () => {
                       <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold text-xs">
                         {patient.bed}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1 max-w-[200px]">
+                        {patient.antibiotics.length > 0 ? (
+                          patient.antibiotics.map((ant, idx) => (
+                            <span key={idx} className="bg-emerald-50 text-emerald-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-100">
+                              {ant}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-slate-400 text-xs italic">Nenhum</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-600 truncate max-w-xs">{patient.diagnosis}</p>
