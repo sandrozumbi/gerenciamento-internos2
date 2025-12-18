@@ -1,13 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Search, Plus, Filter, Edit, Trash2, CheckCircle2, X,
-  Stethoscope, Users, Clock, UserPlus, Sparkles, Loader2
+  Search, Plus, Edit, Trash2, CheckCircle2, X,
+  Clock, Loader2
 } from 'lucide-react';
 import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from '../types.js';
 import { PatientDAO } from '../db.js';
-import { format, differenceInYears, isBefore, startOfDay } from 'date-fns';
-import { GoogleGenAI, Type } from '@google/genai';
+import { format, differenceInYears } from 'date-fns';
 
 interface PatientsPageProps {
   currentUser: Digitizer;
@@ -18,9 +17,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isDischargeModalOpen, setIsDischargeModalOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
-  const [selectedPatientForDischarge, setSelectedPatientForDischarge] = useState<Patient | null>(null);
 
   const loadPatients = async () => {
     setLoading(true);
@@ -28,7 +25,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
       const data = await PatientDAO.find();
       setPatients(data);
     } catch (err) {
-      console.error("Erro ao carregar pacientes:", err);
+      console.error("Erro ao carregar base de dados:", err);
     } finally {
       setLoading(false);
     }
@@ -46,7 +43,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
   }, [patients, searchTerm]);
 
   const handleDelete = async (id: string) => {
-    if (confirm('Deseja realmente excluir este registro no banco de dados?')) {
+    if (confirm('Deseja realmente excluir este registro permanentemente do banco de dados?')) {
       await PatientDAO.deleteOne(id);
       loadPatients();
     }
@@ -57,13 +54,12 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
     setIsModalOpen(true);
   };
 
-  const handleOpenDischargeModal = (patient: Patient) => {
-    setSelectedPatientForDischarge(patient);
-    setIsDischargeModalOpen(true);
-  };
-
   const calculateAge = (birthDate: string) => {
-    return differenceInYears(new Date(), new Date(birthDate));
+    try {
+      return differenceInYears(new Date(), new Date(birthDate));
+    } catch {
+      return 0;
+    }
   };
 
   return (
@@ -101,7 +97,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
         {loading ? (
           <div className="p-20 flex flex-col items-center justify-center gap-4">
             <Loader2 className="animate-spin text-blue-500" size={40} />
-            <p className="text-slate-400 font-medium">Sincronizando com o banco de dados...</p>
+            <p className="text-slate-400 font-medium text-sm uppercase tracking-widest">Sincronizando com Banco de Dados...</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -119,7 +115,7 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
                 {filteredPatients.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-20 text-center text-slate-400">
-                      Nenhum paciente encontrado.
+                      Nenhum registro encontrado na base.
                     </td>
                   </tr>
                 ) : (
@@ -183,19 +179,10 @@ const PatientsPage: React.FC<PatientsPageProps> = ({ currentUser }) => {
           currentUser={currentUser}
         />
       )}
-
-      {isDischargeModalOpen && selectedPatientForDischarge && (
-        <DischargeModal
-          patient={selectedPatientForDischarge}
-          onClose={() => setIsDischargeModalOpen(false)}
-          onSave={loadPatients}
-        />
-      )}
     </div>
   );
 };
 
-// Modal with AI Integration
 const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onSave: () => void, currentUser: Digitizer }> = ({ patient, onClose, onSave, currentUser }) => {
   const [formData, setFormData] = useState<Partial<Patient>>(
     patient || {
@@ -206,49 +193,6 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
     }
   );
   const [isSaving, setIsSaving] = useState(false);
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
-
-  const getAiHelp = async () => {
-    if (!formData.diagnosis || !formData.birthDate) {
-      alert("Preencha idade e diagnóstico para usar a IA.");
-      return;
-    }
-
-    setIsAiLoading(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const age = differenceInYears(new Date(), new Date(formData.birthDate!));
-      
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Como assistente pediátrico, analise: Paciente de ${age} anos com diagnóstico "${formData.diagnosis}". Quais são os 3 pontos de atenção clínica cruciais e quais antibióticos da lista [${ANTIBIOTIC_OPTIONS.join(', ')}] costumam ser indicados? Responda de forma curta e técnica em JSON.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              pontos_atencao: { type: Type.ARRAY, items: { type: Type.STRING } },
-              antibioticos_sugeridos: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["pontos_atencao", "antibioticos_sugeridos"]
-          }
-        }
-      });
-
-      const result = JSON.parse(response.text);
-      setAiSuggestion(result.pontos_atencao.join(' | '));
-      // Pre-select suggested antibiotics if they exist in our list
-      const suggested = result.antibioticos_sugeridos.filter((a: string) => ANTIBIOTIC_OPTIONS.includes(a));
-      if (suggested.length > 0) {
-        setFormData(prev => ({ ...prev, antibiotics: Array.from(new Set([...(prev.antibiotics || []), ...suggested])) }));
-      }
-    } catch (err) {
-      console.error("Erro na IA:", err);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,16 +201,22 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
       id: patient?.id || Math.random().toString(36).substr(2, 9),
       ...formData as Patient
     };
-    await PatientDAO.save(finalData);
-    onSave();
-    onClose();
+    try {
+      await PatientDAO.save(finalData);
+      onSave();
+      onClose();
+    } catch (err) {
+      alert("Erro ao salvar no banco de dados.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <header className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">{patient ? 'Editar' : 'Novo'} Registro</h2>
+          <h2 className="text-xl font-bold text-slate-900">{patient ? 'Editar Prontuário' : 'Novo Registro de Paciente'}</h2>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-900"><X size={24} /></button>
         </header>
 
@@ -274,10 +224,10 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="text-sm font-bold text-slate-700">Nome do Paciente</label>
-              <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
+              <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" placeholder="Nome Completo" />
             </div>
             <div>
-              <label className="text-sm font-bold text-slate-700">Nascimento</label>
+              <label className="text-sm font-bold text-slate-700">Data de Nascimento</label>
               <input required type="date" value={formData.birthDate} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
             </div>
             <div>
@@ -289,34 +239,18 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-bold text-slate-700">Diagnóstico Suspeito</label>
-              <button 
-                type="button" 
-                onClick={getAiHelp} 
-                disabled={isAiLoading}
-                className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
-              >
-                {isAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                Assistente IA
-              </button>
-            </div>
+            <label className="text-sm font-bold text-slate-700 block mb-2">Diagnóstico de Entrada</label>
             <textarea 
               required
               value={formData.diagnosis} 
               onChange={e => setFormData({...formData, diagnosis: e.target.value})}
               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl h-24 resize-none"
-              placeholder="Descreva a suspeita clínica..."
+              placeholder="Descreva a suspeita clínica ou diagnóstico confirmado..."
             />
-            {aiSuggestion && (
-              <div className="mt-2 p-3 bg-amber-50 border border-amber-100 rounded-xl text-[10px] text-amber-800 font-medium animate-in fade-in slide-in-from-top-1">
-                <strong>Sugestão IA:</strong> {aiSuggestion}
-              </div>
-            )}
           </div>
 
           <div>
-            <label className="text-sm font-bold text-slate-700 mb-2 block">Antibióticos Prescritos</label>
+            <label className="text-sm font-bold text-slate-700 mb-2 block">Antibioticoterapia Prescrita</label>
             <div className="flex flex-wrap gap-2">
               {ANTIBIOTIC_OPTIONS.map(ant => (
                 <button
@@ -326,7 +260,7 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
                     const current = formData.antibiotics || [];
                     setFormData({...formData, antibiotics: current.includes(ant) ? current.filter(a => a !== ant) : [...current, ant]});
                   }}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${formData.antibiotics?.includes(ant) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${formData.antibiotics?.includes(ant) ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}
                 >
                   {ant}
                 </button>
@@ -336,46 +270,17 @@ const PatientModal: React.FC<{ patient: Patient | null, onClose: () => void, onS
         </form>
 
         <footer className="p-8 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl">Cancelar</button>
+          <button type="button" onClick={onClose} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-colors">Voltar</button>
           <button 
             type="button" 
             onClick={handleSave} 
             disabled={isSaving}
-            className="px-10 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg flex items-center gap-2"
+            className="px-10 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
           >
             {isSaving && <Loader2 size={18} className="animate-spin" />}
-            {patient ? 'Atualizar no Banco' : 'Salvar Registro'}
+            {patient ? 'Atualizar no Banco' : 'Confirmar Registro'}
           </button>
         </footer>
-      </div>
-    </div>
-  );
-};
-
-const DischargeModal: React.FC<{ patient: Patient, onClose: () => void, onSave: () => void }> = ({ patient, onClose, onSave }) => {
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [loading, setLoading] = useState(false);
-
-  const handleDischarge = async () => {
-    setLoading(true);
-    await PatientDAO.save({ ...patient, dischargeDate: date });
-    onSave();
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-      <div className="bg-white w-full max-w-md rounded-3xl p-8 space-y-6">
-        <h2 className="text-xl font-bold">Confirmar Alta</h2>
-        <p className="text-slate-500">Registrar saída para <strong>{patient.name}</strong>?</p>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl" />
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 p-3 font-bold text-slate-500">Voltar</button>
-          <button onClick={handleDischarge} disabled={loading} className="flex-1 bg-emerald-600 text-white font-bold rounded-xl py-3 flex items-center justify-center gap-2">
-            {loading && <Loader2 size={16} className="animate-spin" />}
-            Confirmar Alta
-          </button>
-        </div>
       </div>
     </div>
   );

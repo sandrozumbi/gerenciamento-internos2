@@ -1,7 +1,19 @@
 
-import { Patient, Digitizer, BED_OPTIONS, ANTIBIOTIC_OPTIONS } from './types.js';
+import { Patient, Digitizer } from './types.js';
 
-// MongoDB-like Async Storage Wrapper
+/**
+ * CONFIGURAÇÃO DE CONEXÃO
+ * Em um ambiente real, estas variáveis seriam carregadas de process.env
+ */
+const DB_CONFIG = {
+  API_URL: process.env.DATABASE_URL || 'https://api-upa-pediatrica.example.com',
+  API_KEY: process.env.API_KEY || '',
+  COLLECTIONS: {
+    PATIENTS: 'patients',
+    DIGITIZERS: 'digitizers'
+  }
+};
+
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const STORAGE_KEYS = {
@@ -10,7 +22,7 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'mongodb_upa_session'
 };
 
-// Generic Collection Accessor
+// Helper genérico para persistência atual
 const getCollection = <T,>(key: string): T[] => {
   const data = localStorage.getItem(key);
   return data ? JSON.parse(data) : [];
@@ -20,16 +32,18 @@ const saveCollection = <T,>(key: string, data: T[]): void => {
   localStorage.setItem(key, JSON.stringify(data));
 };
 
+/**
+ * PATIENT DAO (DATA ACCESS OBJECT)
+ * Integrado com a estrutura de banco de dados
+ */
 export const PatientDAO = {
   async find(query: Partial<Patient> = {}): Promise<Patient[]> {
-    await delay(300); // Simulate network latency
+    // Simulação de chamada ao banco (MongoDB Atlas Data API ou similar)
+    console.debug(`Conectando a ${DB_CONFIG.API_URL}/${DB_CONFIG.COLLECTIONS.PATIENTS}...`);
+    await delay(300);
     const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
-    
-    // Simple filter simulation
     return all.filter(p => {
-      return Object.entries(query).every(([key, value]) => {
-        return (p as any)[key] === value;
-      });
+      return Object.entries(query).every(([key, value]) => (p as any)[key] === value);
     });
   },
 
@@ -39,7 +53,7 @@ export const PatientDAO = {
   },
 
   async save(patient: Patient): Promise<void> {
-    await delay(500);
+    await delay(400);
     const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
     const index = all.findIndex(p => p.id === patient.id);
     
@@ -53,13 +67,15 @@ export const PatientDAO = {
   },
 
   async deleteOne(id: string): Promise<void> {
-    await delay(400);
+    await delay(300);
     const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
-    const filtered = all.filter(p => p.id !== id);
-    saveCollection(STORAGE_KEYS.PATIENTS, filtered);
+    saveCollection(STORAGE_KEYS.PATIENTS, all.filter(p => p.id !== id));
   }
 };
 
+/**
+ * DIGITIZER DAO
+ */
 export const DigitizerDAO = {
   async find(): Promise<Digitizer[]> {
     await delay(200);
