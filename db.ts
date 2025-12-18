@@ -2,74 +2,89 @@
 import { Patient, Digitizer } from './types.js';
 
 /**
- * CONFIGURAÇÃO DE CONEXÃO
- * Em um ambiente real, estas variáveis seriam carregadas de process.env
+ * CONFIGURAÇÃO DE CONEXÃO COM O BANCO DE DADOS
+ * O sistema está pronto para receber as variáveis reais.
  */
 const DB_CONFIG = {
-  API_URL: process.env.DATABASE_URL || 'https://api-upa-pediatrica.example.com',
-  API_KEY: process.env.API_KEY || '',
-  COLLECTIONS: {
-    PATIENTS: 'patients',
-    DIGITIZERS: 'digitizers'
-  }
+  // A URL e API_KEY devem vir do seu provedor de banco de dados (ex: MongoDB Atlas Data API)
+  ENDPOINT: process.env.DATABASE_URL || 'https://api-upa-pediatrica.example.com',
+  API_KEY: process.env.API_KEY || '', 
+  REGION: 'sa-east-1',
 };
 
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const STORAGE_KEYS = {
-  PATIENTS: 'mongodb_upa_patients',
-  DIGITIZERS: 'mongodb_upa_digitizers',
-  CURRENT_USER: 'mongodb_upa_session'
+  PATIENTS: 'db_upa_patients',
+  DIGITIZERS: 'db_upa_digitizers',
+  CURRENT_USER: 'db_upa_session'
 };
 
-// Helper genérico para persistência atual
-const getCollection = <T,>(key: string): T[] => {
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : [];
-};
-
-const saveCollection = <T,>(key: string, data: T[]): void => {
-  localStorage.setItem(key, JSON.stringify(data));
+// Helper de fallback para desenvolvimento local (Persistência no Browser)
+const localDB = {
+  get: <T,>(key: string): T[] => JSON.parse(localStorage.getItem(key) || '[]'),
+  set: <T,>(key: string, data: T[]): void => localStorage.setItem(key, JSON.stringify(data)),
 };
 
 /**
- * PATIENT DAO (DATA ACCESS OBJECT)
- * Integrado com a estrutura de banco de dados
+ * PATIENT DAO - CONTROLADOR DE ACESSO AOS DADOS
+ * Centraliza toda a lógica de salvamento e recuperação.
  */
 export const PatientDAO = {
   async find(query: Partial<Patient> = {}): Promise<Patient[]> {
-    // Simulação de chamada ao banco (MongoDB Atlas Data API ou similar)
-    console.debug(`Conectando a ${DB_CONFIG.API_URL}/${DB_CONFIG.COLLECTIONS.PATIENTS}...`);
-    await delay(300);
-    const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
+    console.debug(`[DB] Buscando registros em ${DB_CONFIG.ENDPOINT}...`);
+    
+    // Simulação de latência de rede real
+    await delay(500);
+
+    // Lógica: Se houver uma API real, faria um fetch aqui.
+    // Por enquanto, usamos a persistência local que espelha o comportamento do banco.
+    const all = localDB.get<Patient>(STORAGE_KEYS.PATIENTS);
+    
     return all.filter(p => {
       return Object.entries(query).every(([key, value]) => (p as any)[key] === value);
-    });
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
-  async findOne(id: string): Promise<Patient | null> {
-    const all = await this.find();
-    return all.find(p => p.id === id) || null;
-  },
+  async save(patientData: Partial<Patient>): Promise<Patient> {
+    console.debug(`[DB] Salvando dados no banco...`, patientData);
+    await delay(800); // Simula o tempo de escrita no banco
 
-  async save(patient: Patient): Promise<void> {
-    await delay(400);
-    const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
-    const index = all.findIndex(p => p.id === patient.id);
+    const all = localDB.get<Patient>(STORAGE_KEYS.PATIENTS);
+    const now = new Date().toISOString();
     
-    if (index > -1) {
-      all[index] = { ...patient, updatedAt: new Date().toISOString() } as any;
+    let updatedPatient: Patient;
+
+    if (patientData.id) {
+      // UPDATE
+      const index = all.findIndex(p => p.id === patientData.id);
+      updatedPatient = { 
+        ...(all[index] || {}), 
+        ...patientData, 
+        updatedAt: now 
+      } as Patient;
+      if (index > -1) all[index] = updatedPatient;
+      else all.push(updatedPatient);
     } else {
-      all.push({ ...patient, createdAt: new Date().toISOString() });
+      // INSERT (Novo Registro)
+      updatedPatient = {
+        ...patientData,
+        id: 'oid_' + Math.random().toString(36).substr(2, 9), // Simula um ObjectId do MongoDB
+        createdAt: now,
+        updatedAt: now
+      } as Patient;
+      all.push(updatedPatient);
     }
     
-    saveCollection(STORAGE_KEYS.PATIENTS, all);
+    localDB.set(STORAGE_KEYS.PATIENTS, all);
+    return updatedPatient;
   },
 
   async deleteOne(id: string): Promise<void> {
-    await delay(300);
-    const all = getCollection<Patient>(STORAGE_KEYS.PATIENTS);
-    saveCollection(STORAGE_KEYS.PATIENTS, all.filter(p => p.id !== id));
+    console.debug(`[DB] Removendo registro ${id} do banco...`);
+    await delay(400);
+    const all = localDB.get<Patient>(STORAGE_KEYS.PATIENTS);
+    localDB.set(STORAGE_KEYS.PATIENTS, all.filter(p => p.id !== id));
   }
 };
 
@@ -78,12 +93,11 @@ export const PatientDAO = {
  */
 export const DigitizerDAO = {
   async find(): Promise<Digitizer[]> {
-    await delay(200);
-    const data = getCollection<Digitizer>(STORAGE_KEYS.DIGITIZERS);
+    await delay(300);
+    let data = localDB.get<Digitizer>(STORAGE_KEYS.DIGITIZERS);
     if (data.length === 0) {
-      const defaultAdmin = [{ id: '1', name: 'Admin Central', email: 'admin@upa.gov.br' }];
-      saveCollection(STORAGE_KEYS.DIGITIZERS, defaultAdmin);
-      return defaultAdmin;
+      data = [{ id: 'admin_1', name: 'Administrador UPA', email: 'admin@upa.gov.br' }];
+      localDB.set(STORAGE_KEYS.DIGITIZERS, data);
     }
     return data;
   },
@@ -93,7 +107,7 @@ export const DigitizerDAO = {
     const index = all.findIndex(d => d.id === digitizer.id);
     if (index > -1) all[index] = digitizer;
     else all.push(digitizer);
-    saveCollection(STORAGE_KEYS.DIGITIZERS, all);
+    localDB.set(STORAGE_KEYS.DIGITIZERS, all);
   }
 };
 
